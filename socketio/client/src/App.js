@@ -1,14 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import React from 'react';
 import io from 'socket.io-client';
-import { produce } from 'immer';
+import { produce, enableMapSet } from 'immer';
+enableMapSet();
 const App = () => {
   const [mySocket, setMySocket] = useState(null);
-  const [roomIdToMessageMapping, setRoomIdToMessageMapping] = useState({})
+  const [roomIdToMessageMapping, setRoomIdToMessageMapping] = useState({});
+  const [roomIdToTypingUsernameMapping, setRoomIdToTypingUsernameMapping] = useState({});
   const [activeRoom, setActiveRoom] = useState(null);
   const [message, setMessage] = useState('');
   const [username, setUsername] = useState(null);
-  const [typingIndicator, setTypingIndicator] = useState('');
   const isPromptShown = useRef(false);
 
 
@@ -41,8 +42,11 @@ const App = () => {
       }));
     })
 
-    socket.on('server-sending-indicator', (message) => {
-      setTypingIndicator(message);
+    socket.on('server-sending-indicator', (data) => {
+      setRoomIdToTypingUsernameMapping(produce(state => {
+        state[data.roomId] = state[data.roomId] || new Set();
+        state[data.roomId].add(data.username);
+      }));
     })
     // Cleanup function
     return () => {
@@ -62,7 +66,6 @@ const App = () => {
     mySocket.on('success-joining-room', (message) => {
       console.log(message);
       setActiveRoom(roomId);
-      setTypingIndicator('');
     })
     mySocket.on('error-joining-room', (message) => {
       console.log(message);
@@ -84,11 +87,12 @@ const App = () => {
     if (activeRoom == null) {
       alert('Please Join a room before sending a message.');
     } else {
-      mySocket.emit('send-typing-indicator', {roomId: activeRoom, username: username});
+      mySocket.emit('send-typing-indicator', { roomId: activeRoom, username: username });
     }
   }
 
   const roomMessages = roomIdToMessageMapping[activeRoom] || []
+  const currentlyTypingUsers = roomIdToTypingUsernameMapping[activeRoom] ? [...roomIdToTypingUsernameMapping[activeRoom]] : [];
   return (
     <div className='grid grid-cols-12 divide-x divide-gray-300'>
       <aside className='col-span-2 px-8 h-screen overflow-y-auto'>
@@ -108,6 +112,7 @@ const App = () => {
       </aside>
       <main className='col-span-10 px-8 h-screen flex flex-col'>
         <b>{`Your username: ${username}`}</b>
+        <p>{(currentlyTypingUsers.length > 0 ? `Typing: ${currentlyTypingUsers.join(', ')}` : '')}</p>
         {roomMessages.map(({ username, message }, id) => {
           return (
             <div key={id} className='w-full px-4 py-4'>
@@ -118,7 +123,6 @@ const App = () => {
         })}
         <div className='flex-grow' />
         <div className="mb-8 flex justify-center items-center gap-2">
-          <p>{typingIndicator}</p>
           <textarea
             id="about"
             name="about"
@@ -127,9 +131,6 @@ const App = () => {
             onChange={(e) => {
               sendTypingIndicator();
               setMessage(e.target.value)
-            }}
-            onBlur={(e) => {
-              setTypingIndicator('');
             }}
             className="block flex-grow mb-8 w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
           >
